@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+public/local-mirror/
 
 # debug
 npm-debug.log*
