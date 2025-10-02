@@ -336,9 +336,15 @@ async function downloadAssetPlan(
   preferredProxy: string | undefined,
   proxiesUsed: Set<string>
 ): Promise<AssetUploadResult> {
+  const shouldAllowDirectFallback = !preferProxy || proxyPool.length === 0;
+
   const attempts: Array<string | undefined> = preferProxy && proxyPool.length > 0
-    ? [...buildProxyAttempts(preferredProxy, proxyPool, MAX_PROXY_ATTEMPTS - 1), undefined]
-    : [undefined];
+    ? buildProxyAttempts(preferredProxy, proxyPool, MAX_PROXY_ATTEMPTS - 1)
+    : [];
+
+  if (shouldAllowDirectFallback || attempts.length === 0) {
+    attempts.push(undefined);
+  }
 
   let lastError: string | null = null;
 
