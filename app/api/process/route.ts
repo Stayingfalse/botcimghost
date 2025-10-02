@@ -15,6 +15,51 @@ type StreamOptions = {
   publicBaseUrl?: string;
 };
 
+function pickForwardedValue(raw: string | null) {
+  if (!raw) return null;
+  return raw.split(",").map((value) => value.trim()).find(Boolean) ?? null;
+}
+
+function resolvePublicBaseUrl(request: NextRequest) {
+  const forwarded = pickForwardedValue(request.headers.get("forwarded"));
+  if (forwarded) {
+    const params = forwarded.split(";").reduce<Record<string, string>>((acc, part) => {
+      const [key, value] = part.split("=");
+      if (key && value) {
+        acc[key.trim().toLowerCase()] = value.trim();
+      }
+      return acc;
+    }, {});
+
+    const proto = params["proto"];
+    const host = params["host"];
+    if (host) {
+      const scheme = proto ?? request.nextUrl.protocol.replace(/:$/, "");
+      return `${scheme}://${host}`;
+    }
+  }
+
+  const forwardedProto = pickForwardedValue(request.headers.get("x-forwarded-proto"));
+  const forwardedHost = pickForwardedValue(request.headers.get("x-forwarded-host"));
+  const forwardedPort = pickForwardedValue(request.headers.get("x-forwarded-port"));
+
+  if (forwardedHost) {
+    const scheme = forwardedProto ?? request.nextUrl.protocol.replace(/:$/, "");
+    const hostValue = forwardedHost.includes(":") || !forwardedPort || ["80", "443"].includes(forwardedPort)
+      ? forwardedHost
+      : `${forwardedHost}:${forwardedPort}`;
+    return `${scheme}://${hostValue}`;
+  }
+
+  const hostHeader = request.headers.get("host");
+  if (hostHeader) {
+    const scheme = forwardedProto ?? request.nextUrl.protocol.replace(/:$/, "");
+    return `${scheme}://${hostHeader}`;
+  }
+
+  return request.nextUrl.origin;
+}
+
 function streamProcessing(scriptContent: string, options?: StreamOptions) {
   const encoder = new TextEncoder();
 
@@ -56,7 +101,7 @@ function streamProcessing(scriptContent: string, options?: StreamOptions) {
 
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? "";
-  const publicBaseUrl = request.nextUrl.origin;
+  const publicBaseUrl = resolvePublicBaseUrl(request);
 
   const parseBoolean = (value: unknown): boolean => {
     if (typeof value === "boolean") return value;
