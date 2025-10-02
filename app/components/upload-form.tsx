@@ -83,7 +83,7 @@ function buildAssetRows(result: ProcessedScriptResponse | null): AssetRow[] {
   if (!result) return [];
   return result.assets.map((asset) => ({
     id: `${asset.entryName} (${asset.entryId})`,
-    variant: asset.variantLabel,
+    variant: asset.variantLabel ?? "Default",
     field: asset.field,
     originalUrl: asset.originalUrl,
     publicUrl: asset.publicUrl,

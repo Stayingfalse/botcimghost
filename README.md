@@ -47,6 +47,19 @@ Navigate to [http://localhost:3000](http://localhost:3000) and upload your scrip
 
 If you omit the S3 credentials during development, the app mirrors assets to `public/local-mirror`, keeping the rest of the workflow identical.
 
+### Run with Docker
+
+Build the production image and start it locally (serving on port 3000 by default):
+
+```powershell
+docker build -t botcimghost .
+docker run --rm -it -p 3000:3000 `
+	--env-file .env.local `
+	botcimghost
+```
+
+The container uses the same environment variables described above. Provide them individually with `-e KEY=value` or mount an `.env.local` file as shown. When no S3 credentials are supplied, the runtime continues to use the local mirror within the container’s filesystem.
+
 ### API usage
 
 You can also trigger processing programmatically by POSTing to `/api/process` with either multipart form data or JSON:

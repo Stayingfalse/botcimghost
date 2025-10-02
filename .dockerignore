@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.DS_Store
+.next
+out
+.git
+.github
+.vscode
+public/local-mirror
