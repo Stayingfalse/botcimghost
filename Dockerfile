@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
 FROM node:20-slim AS base
-ENV NODE_ENV=production
 WORKDIR /app
 
 FROM base AS deps
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM deps AS builder
+ENV NODE_ENV=production
 COPY . .
 RUN npm run build
 
