@@ -5,15 +5,19 @@ WORKDIR /app
 
 FROM base AS deps
 ENV NODE_ENV=development
+ENV npm_config_production=false
 COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM deps AS builder
 ENV NODE_ENV=production
+ENV npm_config_production=false
 COPY . .
 RUN npm run build
 
 FROM deps AS production-deps
+ENV NODE_ENV=production
+ENV npm_config_production=true
 RUN npm prune --omit=dev
 
 FROM base AS runner
