@@ -392,7 +392,7 @@ async function downloadAssetPlan(
 
 export async function processScriptUpload(
   { scriptContent, requestedName }: ProcessScriptParams,
-  options?: { onEvent?: (event: ProcessingEvent) => void; useUsProxy?: boolean }
+  options?: { onEvent?: (event: ProcessingEvent) => void; useUsProxy?: boolean; publicBaseUrl?: string }
 ): Promise<ProcessedScriptResponse> {
   const emit = options?.onEvent ?? (() => {});
   const parsed = JSON.parse(scriptContent);
@@ -414,6 +414,7 @@ export async function processScriptUpload(
 
   const storageMode: StorageMode = isS3Configured() ? "s3" : "local";
   const s3Config = storageMode === "s3" ? requireS3Config() : null;
+  const basePublicUrl = options?.publicBaseUrl;
 
   const preferProxy = options?.useUsProxy ?? shouldUseUsProxy();
   const proxyListUrl = runtimeEnv.US_PROXY_LIST_URL;
@@ -429,7 +430,7 @@ export async function processScriptUpload(
           storageKey: args.key,
           publicUrl: await uploadBuffer(args),
         }
-      : writeLocalBuffer(args);
+      : writeLocalBuffer({ ...args, baseUrl: basePublicUrl });
 
   const storeJson = async ({ key, json }: StoreJsonArgs) =>
     storageMode === "s3"
@@ -437,7 +438,7 @@ export async function processScriptUpload(
           storageKey: key,
           publicUrl: await uploadJson({ key, json }),
         }
-      : writeLocalJson({ key, json });
+      : writeLocalJson({ key, json, baseUrl: basePublicUrl });
 
   const assetResults: (AssetUploadResult | undefined)[] = new Array(plans.length);
 

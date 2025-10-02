@@ -12,6 +12,7 @@ type StreamPayload =
 type StreamOptions = {
   requestedName?: string;
   useProxy?: boolean;
+  publicBaseUrl?: string;
 };
 
 function streamProcessing(scriptContent: string, options?: StreamOptions) {
@@ -29,6 +30,7 @@ function streamProcessing(scriptContent: string, options?: StreamOptions) {
           {
             onEvent: (event) => send({ type: "progress", event }),
             useUsProxy: options?.useProxy,
+            publicBaseUrl: options?.publicBaseUrl,
           }
         );
 
@@ -54,6 +56,7 @@ function streamProcessing(scriptContent: string, options?: StreamOptions) {
 
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? "";
+  const publicBaseUrl = request.nextUrl.origin;
 
   const parseBoolean = (value: unknown): boolean => {
     if (typeof value === "boolean") return value;
@@ -77,6 +80,7 @@ export async function POST(request: NextRequest) {
     return streamProcessing(body.script, {
       requestedName: typeof body.scriptName === "string" ? body.scriptName : undefined,
       useProxy: parseBoolean((body as Record<string, unknown>).useProxy),
+      publicBaseUrl,
     });
   }
 
@@ -106,5 +110,6 @@ export async function POST(request: NextRequest) {
   return streamProcessing(buffer.toString("utf-8"), {
     requestedName: typeof overrideName === "string" ? overrideName : undefined,
     useProxy: parseBoolean(useProxyValue),
+    publicBaseUrl,
   });
 }

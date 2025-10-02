@@ -30,26 +30,31 @@ function toPublicUrl(key: string) {
 export async function writeLocalBuffer({
   key,
   buffer,
+  baseUrl,
 }: {
   key: string;
   buffer: Buffer;
   contentType?: string;
   cacheControl?: string;
+  baseUrl?: string;
 }) {
   const sanitized = await ensureDirectoryForKey(key);
   const filePath = path.join(LOCAL_ROOT, sanitized);
   await fs.writeFile(filePath, buffer);
 
+  const publicPath = toPublicUrl(sanitized);
+  const publicUrl = baseUrl ? new URL(publicPath, baseUrl).toString() : publicPath;
+
   return {
     storageKey: path.posix.join("local-mirror", sanitized.replace(/\\/g, "/")),
-    publicUrl: toPublicUrl(sanitized),
+    publicUrl,
   };
 }
 
-export async function writeLocalJson({ key, json }: { key: string; json: unknown }) {
+export async function writeLocalJson({ key, json, baseUrl }: { key: string; json: unknown; baseUrl?: string }) {
   const payload = typeof json === "string" ? json : JSON.stringify(json, null, 2);
   const buffer = Buffer.from(payload, "utf-8");
-  return writeLocalBuffer({ key, buffer });
+  return writeLocalBuffer({ key, buffer, baseUrl });
 }
 
 export function buildLocalPublicUrl(key: string) {
