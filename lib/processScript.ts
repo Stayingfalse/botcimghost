@@ -4,7 +4,7 @@ import { extension as mimeExtension } from "mime-types";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import scriptSchema from "@/app/lib/script-schema.json" assert { type: "json" };
-import type { Dispatcher } from "undici";
+import { fetch as undiciFetch, type Dispatcher } from "undici";
 import { uploadBuffer, uploadJson } from "./s3";
 import { requireS3Config, isS3Configured, runtimeEnv, shouldUseUsProxy } from "./env";
 import { fetchUsHttpProxyList, createProxyAgent } from "./proxy";
@@ -80,7 +80,7 @@ type ProcessedScriptResponse = {
   proxiesUsed: string[];
 };
 
-type ProxyCapableRequestInit = RequestInit & { dispatcher?: Dispatcher };
+type ProxyCapableRequestInit = NonNullable<Parameters<typeof undiciFetch>[1]> & { dispatcher?: Dispatcher };
 
 type StoreBufferArgs = {
   key: string;
@@ -316,12 +316,12 @@ async function fetchWithTimeout(url: string, proxyUrl: string | undefined, timeo
       }
     }
 
-    const init: ProxyCapableRequestInit = { signal: controller.signal };
+  const init: ProxyCapableRequestInit = { signal: controller.signal } as ProxyCapableRequestInit;
     if (dispatcher) {
       init.dispatcher = dispatcher;
     }
 
-    return await fetch(url, init);
+    return await undiciFetch(url, init);
   } finally {
     clearTimeout(timeoutId);
   }
