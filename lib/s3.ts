@@ -79,23 +79,23 @@ export async function uploadBuffer({
   contentType?: string;
   cacheControl?: string;
 }) {
-  await putObject({
+  const result = await putObject({
     Key: key,
     Body: buffer,
     ContentType: contentType,
     CacheControl: cacheControl,
   });
 
-  return buildPublicUrl(key);
+  return buildPublicUrl(result.key);
 }
 
 export async function uploadJson({ key, json }: { key: string; json: unknown }) {
   const payload = typeof json === "string" ? json : JSON.stringify(json, null, 2);
-  await putObject({
+  const result = await putObject({
     Key: key,
     Body: payload,
     ContentType: "application/json",
     CacheControl: "no-cache",
   });
-  return buildPublicUrl(key);
+  return buildPublicUrl(result.key);
 }
