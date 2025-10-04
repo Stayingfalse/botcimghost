@@ -1,9 +1,11 @@
+import BetaNotice from "./components/beta-notice";
 import { UploadForm } from "./components/upload-form";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white px-6 py-12 font-sans text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-slate-100">
-      <main className="mx-auto flex max-w-6xl flex-col items-center gap-10">
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white font-sans text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-slate-100">
+      <BetaNotice />
+      <main className="mx-auto flex max-w-6xl flex-col items-center gap-10 px-6 py-12">
         <header className="text-center sm:text-left">
           <p className="text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-300">
             Blood on the Clocktower Toolkit
