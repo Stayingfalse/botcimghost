@@ -101,12 +101,28 @@ export function UploadForm() {
   const [totalAssets, setTotalAssets] = useState<number | null>(null);
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [useProxy, setUseProxy] = useState(false);
+  const [proxyOptionEnabled, setProxyOptionEnabled] = useState(false);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const totalAssetsRef = useRef<number | null>(null);
 
   useEffect(() => {
     totalAssetsRef.current = totalAssets;
   }, [totalAssets]);
+
+  useEffect(() => {
+    async function fetchConfig() {
+      try {
+        const response = await fetch("/api/config");
+        if (response.ok) {
+          const data = (await response.json()) as { proxyOptionEnabled: boolean };
+          setProxyOptionEnabled(data.proxyOptionEnabled);
+        }
+      } catch (error) {
+        console.warn("Failed to fetch config:", error);
+      }
+    }
+    fetchConfig();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -346,22 +362,24 @@ export function UploadForm() {
               disabled={processing}
             />
           </div>
-          <label className="flex items-start gap-3 rounded-md border border-transparent px-2 py-1.5 text-sm transition hover:border-indigo-200 dark:hover:border-indigo-700">
-            <input
-              type="checkbox"
-              className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
-              checked={useProxy}
-              onChange={(event) => setUseProxy(event.target.checked)}
-              disabled={processing}
-              name="useProxyToggle"
-            />
-            <span className="text-slate-700 dark:text-slate-200">
-              Use US proxy for downloads
-              <span className="block text-xs text-slate-500 dark:text-slate-400">
-                Helpful if source hosts geo-block UK visitors. Uncheck to fall back to direct downloads.
+          {proxyOptionEnabled && (
+            <label className="flex items-start gap-3 rounded-md border border-transparent px-2 py-1.5 text-sm transition hover:border-indigo-200 dark:hover:border-indigo-700">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
+                checked={useProxy}
+                onChange={(event) => setUseProxy(event.target.checked)}
+                disabled={processing}
+                name="useProxyToggle"
+              />
+              <span className="text-slate-700 dark:text-slate-200">
+                Use US proxy for downloads
+                <span className="block text-xs text-slate-500 dark:text-slate-400">
+                  Helpful if source hosts geo-block UK visitors. Uncheck to fall back to direct downloads.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
         </div>
 
         <div className="flex items-center justify-between">

@@ -25,6 +25,13 @@ const envSchema = z.object({
       return value === "true" || value === "1";
     }),
   US_PROXY_LIST_URL: z.string().url().optional(),
+  ENABLE_PROXY_OPTION: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return false;
+      return value === "true" || value === "1";
+    }),
   NODE_ENV: z.string().default("development"),
 });
 
@@ -42,6 +49,7 @@ const rawEnv: RawEnv = {
   S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE,
   USE_US_PROXY: process.env.USE_US_PROXY,
   US_PROXY_LIST_URL: process.env.US_PROXY_LIST_URL,
+  ENABLE_PROXY_OPTION: process.env.ENABLE_PROXY_OPTION,
   NODE_ENV: process.env.NODE_ENV ?? "development",
 };
 
@@ -64,6 +72,7 @@ const env: ParsedEnv = parsedEnv.success
       S3_FORCE_PATH_STYLE: undefined,
       USE_US_PROXY: false,
       US_PROXY_LIST_URL: rawEnv.US_PROXY_LIST_URL,
+      ENABLE_PROXY_OPTION: false,
       NODE_ENV: rawEnv.NODE_ENV ?? "development",
     };
 
@@ -107,4 +116,8 @@ export const runtimeEnv = env;
 
 export function shouldUseUsProxy() {
   return env.USE_US_PROXY;
+}
+
+export function isProxyOptionEnabled() {
+  return env.ENABLE_PROXY_OPTION;
 }
