@@ -21,18 +21,28 @@ function getClient() {
 
 type BucketlessPutObjectInput = Omit<PutObjectCommandInput, "Bucket"> & { Key: string };
 
+function applyPathPrefix(key: string): string {
+  const config = requireS3Config();
+  if (!config.pathPrefix) return key;
+  const prefix = config.pathPrefix.replace(/\/+$/, "");
+  const cleanKey = key.replace(/^\/+/, "");
+  return `${prefix}/${cleanKey}`;
+}
+
 export async function putObject(input: BucketlessPutObjectInput) {
   const config = requireS3Config();
   const client = getClient();
+  const prefixedKey = applyPathPrefix(input.Key!);
   const command = new PutObjectCommand({
     Bucket: config.bucket,
     ...input,
+    Key: prefixedKey,
   });
 
   await client.send(command);
   return {
     bucket: config.bucket,
-    key: input.Key!,
+    key: prefixedKey,
   };
 }
 
