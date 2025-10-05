@@ -9,6 +9,7 @@ import { uploadBuffer, uploadJson, objectExists } from "./s3";
 import { requireS3Config, isS3Configured, runtimeEnv, shouldUseUsProxy } from "./env";
 import { fetchUsHttpProxyList, createProxyAgent } from "./proxy";
 import { writeLocalBuffer, writeLocalJson } from "./localStorage";
+import sharp from "sharp";
 
 type ScriptEntry = unknown;
 type ScriptDocument = ScriptEntry[];
@@ -46,6 +47,9 @@ type AssetUploadResult = AssetPlan & {
   publicUrl: string;
   contentType: string;
   size: number;
+  resizedStorageKey?: string;
+  resizedPublicUrl?: string;
+  resizedSize?: number;
 };
 
 type StorageMode = "s3" | "local";
@@ -74,8 +78,11 @@ type ProcessedScriptResponse = {
   originalScriptUrl: string;
   rewrittenScriptKey: string;
   rewrittenScriptUrl: string;
+  rewritten256ScriptKey: string;
+  rewritten256ScriptUrl: string;
   assets: AssetUploadResult[];
   rewrittenScript: ScriptDocument;
+  rewritten256Script: ScriptDocument;
   proxyEnabled: boolean;
   proxiesUsed: string[];
 };
@@ -387,12 +394,31 @@ async function downloadAssetPlan(
           proxiesUsed.add(proxyCandidate);
         }
 
+        // For character images, also check for 256px version
+        let resizedResult: { storageKey: string; publicUrl: string; size: number } | undefined;
+        if (plan.entryType === "character" && plan.field === "image") {
+          const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
+          const resizedExists = await checkExists(resizedKey);
+          if (resizedExists) {
+            const { publicUrl: resizedPublicUrl } = await storeBuffer({
+              key: resizedKey,
+              buffer: Buffer.alloc(0),
+              contentType,
+              cacheControl: "public, max-age=31536000, immutable",
+            });
+            resizedResult = { storageKey: resizedKey, publicUrl: resizedPublicUrl, size: 0 };
+          }
+        }
+
         return {
           ...plan,
           storageKey: key,
           publicUrl,
           contentType,
           size: buffer.byteLength,
+          resizedStorageKey: resizedResult?.storageKey,
+          resizedPublicUrl: resizedResult?.publicUrl,
+          resizedSize: resizedResult?.size,
         };
       }
 
@@ -402,6 +428,33 @@ async function downloadAssetPlan(
         contentType,
         cacheControl: "public, max-age=31536000, immutable",
       });
+
+      // For character images, also create and store 256px version
+      let resizedResult: { storageKey: string; publicUrl: string; size: number } | undefined;
+      if (plan.entryType === "character" && plan.field === "image") {
+        try {
+          const resizedBuffer = await sharp(buffer)
+            .resize(256, 256, { fit: "cover" })
+            .toBuffer();
+
+          const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
+          const { storageKey: resizedStorageKey, publicUrl: resizedPublicUrl } = await storeBuffer({
+            key: resizedKey,
+            buffer: resizedBuffer,
+            contentType,
+            cacheControl: "public, max-age=31536000, immutable",
+          });
+
+          resizedResult = {
+            storageKey: resizedStorageKey,
+            publicUrl: resizedPublicUrl,
+            size: resizedBuffer.byteLength,
+          };
+        } catch (resizeError) {
+          console.warn(`Failed to resize character image ${plan.originalUrl}:`, resizeError);
+          // Continue without resized version if resize fails
+        }
+      }
 
       if (typeof proxyCandidate === "string") {
         proxiesUsed.add(proxyCandidate);
@@ -413,6 +466,9 @@ async function downloadAssetPlan(
         publicUrl,
         contentType,
         size: buffer.byteLength,
+        resizedStorageKey: resizedResult?.storageKey,
+        resizedPublicUrl: resizedResult?.publicUrl,
+        resizedSize: resizedResult?.size,
       };
     } catch (error) {
       const detail = error instanceof Error && error.name === "AbortError"
@@ -531,31 +587,48 @@ export async function processScriptUpload(
     ? structuredClone(script)
     : JSON.parse(JSON.stringify(script))) as ScriptDocument;
 
+  const rewritten256Script = (typeof structuredClone === "function"
+    ? structuredClone(script)
+    : JSON.parse(JSON.stringify(script))) as ScriptDocument;
+
   processedAssets.forEach((asset) => {
     const entry = rewrittenScript[asset.scriptIndex];
+    const entry256 = rewritten256Script[asset.scriptIndex];
     if (!isRecord(entry)) return;
+    if (!isRecord(entry256)) return;
 
     if (asset.field === "image") {
       const imageValue = (entry as ScriptCharacter).image;
+      const imageValue256 = (entry256 as ScriptCharacter).image;
       if (Array.isArray(imageValue)) {
         const index = asset.variantIndex ?? 0;
         imageValue[index] = asset.publicUrl;
+        // Use resized URL for 256 script if available, otherwise use original
+        if (Array.isArray(imageValue256)) {
+          imageValue256[index] = asset.resizedPublicUrl ?? asset.publicUrl;
+        }
       } else {
         (entry as ScriptCharacter).image = asset.publicUrl;
+        // Use resized URL for 256 script if available, otherwise use original
+        (entry256 as ScriptCharacter).image = asset.resizedPublicUrl ?? asset.publicUrl;
       }
     } else {
+      // For logo and background, use full size in both scripts
       (entry as Record<string, unknown>)[asset.field] = asset.publicUrl;
+      (entry256 as Record<string, unknown>)[asset.field] = asset.publicUrl;
     }
   });
 
   const manifestBaseKey = `${prefix}/manifest.json`;
   const originalScriptBaseKey = `${prefix}/original.json`;
   const rewrittenScriptBaseKey = `${prefix}/rewritten.json`;
+  const rewritten256ScriptBaseKey = `${prefix}/rewritten_256.json`;
 
-  const [manifestResult, originalResult, rewrittenResult] = await Promise.all([
+  const [manifestResult, originalResult, rewrittenResult, rewritten256Result] = await Promise.all([
     storeJson({ key: manifestBaseKey, json: processedAssets }),
     storeJson({ key: originalScriptBaseKey, json: script }),
     storeJson({ key: rewrittenScriptBaseKey, json: rewrittenScript }),
+    storeJson({ key: rewritten256ScriptBaseKey, json: rewritten256Script }),
   ]);
 
   return {
@@ -572,8 +645,11 @@ export async function processScriptUpload(
     originalScriptUrl: originalResult.publicUrl,
     rewrittenScriptKey: rewrittenResult.storageKey,
     rewrittenScriptUrl: rewrittenResult.publicUrl,
+    rewritten256ScriptKey: rewritten256Result.storageKey,
+    rewritten256ScriptUrl: rewritten256Result.publicUrl,
     assets: processedAssets,
     rewrittenScript,
+    rewritten256Script,
     proxyEnabled: preferProxy && proxyPool.length > 0,
     proxiesUsed: Array.from(proxiesUsed),
   };

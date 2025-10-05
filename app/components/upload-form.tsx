@@ -536,7 +536,15 @@ export function UploadForm() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-indigo-600 transition hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-600 dark:text-indigo-300"
               >
-                Download Rewritten JSON
+                Download Full-Size Script
+              </a>
+              <a
+                href={result.rewritten256ScriptUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-indigo-600 transition hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-600 dark:text-indigo-300"
+              >
+                Download 256px Script
               </a>
               <a
                 href={result.originalScriptUrl}
