@@ -601,10 +601,13 @@ export async function processScriptUpload(
   const originalAssets = processedAssets.filter(asset => !asset.variantLabel?.includes("(256px)"));
   const resizedAssets = processedAssets.filter(asset => asset.variantLabel?.includes("(256px)"));
 
+  console.log(`Total assets: ${processedAssets.length}, Original: ${originalAssets.length}, Resized: ${resizedAssets.length}`);
+
   // Create a map for quick lookup of resized versions
   const resizedMap = new Map<string, AssetUploadResult>();
   resizedAssets.forEach(asset => {
     const key = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
+    console.log(`Adding resized asset to map: key=${key}, url=${asset.publicUrl}`);
     resizedMap.set(key, asset);
   });
 
@@ -622,15 +625,19 @@ export async function processScriptUpload(
       const resizedKey = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
       const resizedAsset = resizedMap.get(resizedKey);
 
+      console.log(`Looking up resized asset: key=${resizedKey}, found=${!!resizedAsset}, original=${asset.publicUrl}, resized=${resizedAsset?.publicUrl || 'N/A'}`);
+
       if (Array.isArray(imageValue)) {
         const index = asset.variantIndex ?? 0;
         imageValue[index] = asset.publicUrl;
         if (Array.isArray(imageValue256)) {
           imageValue256[index] = resizedAsset?.publicUrl ?? asset.publicUrl;
+          console.log(`Array image updated: index=${index}, 256url=${imageValue256[index]}`);
         }
       } else {
         (entry as ScriptCharacter).image = asset.publicUrl;
         (entry256 as ScriptCharacter).image = resizedAsset?.publicUrl ?? asset.publicUrl;
+        console.log(`Single image updated: 256url=${(entry256 as ScriptCharacter).image}`);
       }
     } else {
       // For logo and background, use full size in both scripts
@@ -650,6 +657,13 @@ export async function processScriptUpload(
     storeJson({ key: rewrittenScriptBaseKey, json: rewrittenScript }),
     storeJson({ key: rewritten256ScriptBaseKey, json: rewritten256Script }),
   ]);
+
+  // Final verification
+  console.log(`Final script comparison check:`);
+  const origImages = rewrittenScript.filter(isScriptCharacter).map(c => c.image);
+  const resizedImages = rewritten256Script.filter(isScriptCharacter).map(c => c.image);
+  console.log(`Original script images:`, origImages);
+  console.log(`256px script images:`, resizedImages);
 
   return {
     scriptName,
