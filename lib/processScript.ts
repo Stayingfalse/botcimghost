@@ -1,11 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { extension as mimeExtension } from "mime-types";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import scriptSchema from "@/app/lib/script-schema.json" assert { type: "json" };
 import { fetch as undiciFetch, type Dispatcher } from "undici";
-import { uploadBuffer, uploadJson } from "./s3";
+import { uploadBuffer, uploadJson, objectExists } from "./s3";
 import { requireS3Config, isS3Configured, runtimeEnv, shouldUseUsProxy } from "./env";
 import { fetchUsHttpProxyList, createProxyAgent } from "./proxy";
 import { writeLocalBuffer, writeLocalJson } from "./localStorage";
@@ -255,10 +255,14 @@ function resolveExtension(url: string, contentType: string | null) {
   return mimeExtension(contentType) ?? "bin";
 }
 
-function makeStoragePrefix(scriptName: string) {
-  const uid = randomUUID().slice(0, 8);
+function hashContent(content: string | Buffer): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+function makeStoragePrefix(scriptContent: string, scriptName: string) {
+  const contentHash = hashContent(scriptContent);
   const scriptSegment = toFriendlySegment(scriptName, "Custom_Script");
-  return `${scriptSegment}_${uid}`;
+  return `${scriptSegment}_${contentHash}`;
 }
 
 function ensureScriptDocument(candidate: unknown): ScriptDocument {
@@ -331,6 +335,7 @@ async function downloadAssetPlan(
   plan: AssetPlan,
   prefix: string,
   storeBuffer: (args: StoreBufferArgs) => Promise<{ storageKey: string; publicUrl: string }>,
+  checkExists: (key: string) => Promise<boolean>,
   preferProxy: boolean,
   proxyPool: string[],
   preferredProxy: string | undefined,
@@ -361,8 +366,35 @@ async function downloadAssetPlan(
       const buffer = Buffer.from(arrayBuffer);
       const contentType = response.headers.get("content-type") ?? "application/octet-stream";
       const extension = resolveExtension(plan.originalUrl, contentType);
+
+      // Generate content-based hash for the image
+      const imageHash = hashContent(buffer);
       const sanitizedBase = plan.fileBaseName.replace(/[^\w.-]/g, "_");
-      const key = `${prefix}/${sanitizedBase}.${extension}`;
+      const key = `${prefix}/${sanitizedBase}_${imageHash}.${extension}`;
+
+      // Check if asset already exists (deduplication)
+      const exists = await checkExists(key);
+      if (exists) {
+        // Asset already exists, return existing reference without re-uploading
+        const { publicUrl } = await storeBuffer({
+          key,
+          buffer: Buffer.alloc(0), // Empty buffer as signal to skip upload
+          contentType,
+          cacheControl: "public, max-age=31536000, immutable",
+        });
+
+        if (typeof proxyCandidate === "string") {
+          proxiesUsed.add(proxyCandidate);
+        }
+
+        return {
+          ...plan,
+          storageKey: key,
+          publicUrl,
+          contentType,
+          size: buffer.byteLength,
+        };
+      }
 
       const { storageKey, publicUrl } = await storeBuffer({
         key,
@@ -415,7 +447,7 @@ export async function processScriptUpload(
 
   const scriptName = requestedName ?? metaEntry?.name ?? "Custom Script";
   const scriptSlug = toFriendlySegment(scriptName, "Custom_Script");
-  const prefix = makeStoragePrefix(scriptName);
+  const prefix = makeStoragePrefix(scriptContent, scriptName);
   emit({ type: "planSummary", totalAssets: plans.length, scriptName });
 
   const storageMode: StorageMode = isS3Configured() ? "s3" : "local";
@@ -437,6 +469,9 @@ export async function processScriptUpload(
           publicUrl: await uploadBuffer(args),
         }
       : writeLocalBuffer({ ...args, baseUrl: basePublicUrl });
+
+  const checkExists = async (key: string) =>
+    storageMode === "s3" ? await objectExists(key) : false;
 
   const storeJson = async ({ key, json }: StoreJsonArgs) =>
     storageMode === "s3"
@@ -470,6 +505,7 @@ export async function processScriptUpload(
           plan,
           prefix,
           storeBuffer,
+          checkExists,
           preferProxy,
           proxyPool,
           preferredProxy,
