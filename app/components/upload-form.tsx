@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import type { ProcessedScriptResponse, ProcessingEvent } from "@/lib/processScript";
 
 type FormStatus = "idle" | "uploading" | "success" | "error";
@@ -13,6 +14,9 @@ type AssetRow = {
   publicUrl: string;
   sizeLabel: string;
   contentType: string;
+  previewUrl?: string;
+  resizedUrl?: string;
+  resizedSize?: string;
 };
 
 type StreamPayload =
@@ -81,15 +85,36 @@ function updateProgressCollection(
 
 function buildAssetRows(result: ProcessedScriptResponse | null): AssetRow[] {
   if (!result) return [];
-  return result.assets.map((asset) => ({
-    id: `${asset.entryName} (${asset.entryId})`,
-    variant: asset.variantLabel ?? "Default",
-    field: asset.field,
-    originalUrl: asset.originalUrl,
-    publicUrl: asset.publicUrl,
-    sizeLabel: formatBytes(asset.size),
-    contentType: asset.contentType,
-  }));
+
+  // Separate original and resized assets
+  const originalAssets = result.assets.filter(asset => !asset.variantLabel?.includes("(256px)"));
+  const resizedAssets = result.assets.filter(asset => asset.variantLabel?.includes("(256px)"));
+
+  // Create a map of resized assets by their base identifier
+  const resizedMap = new Map<string, typeof result.assets[0]>();
+  resizedAssets.forEach(asset => {
+    const key = `${asset.scriptIndex}:${asset.variantIndex ?? 0}:${asset.field}`;
+    resizedMap.set(key, asset);
+  });
+
+  // Build rows with resized versions linked to originals
+  return originalAssets.map((asset) => {
+    const key = `${asset.scriptIndex}:${asset.variantIndex ?? 0}:${asset.field}`;
+    const resized = resizedMap.get(key);
+
+    return {
+      id: `${asset.entryName} (${asset.entryId})`,
+      variant: asset.variantLabel ?? "Default",
+      field: asset.field,
+      originalUrl: asset.originalUrl,
+      publicUrl: asset.publicUrl,
+      sizeLabel: formatBytes(asset.size),
+      contentType: asset.contentType,
+      previewUrl: resized?.publicUrl,
+      resizedUrl: resized?.publicUrl,
+      resizedSize: resized ? formatBytes(resized.size) : undefined,
+    };
+  });
 }
 
 export function UploadForm() {
@@ -587,17 +612,30 @@ export function UploadForm() {
             <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
               <thead className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 <tr>
+                  <th className="px-4 py-3">Preview</th>
                   <th className="px-4 py-3">Entry</th>
                   <th className="px-4 py-3">Variant</th>
                   <th className="px-4 py-3">Field</th>
                   <th className="px-4 py-3">Content Type</th>
                   <th className="px-4 py-3">Size</th>
-                  <th className="px-4 py-3">Mirrored URL</th>
+                  <th className="px-4 py-3">Mirrored URLs</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {assets.map((asset) => (
                   <tr key={`${asset.id}-${asset.variant}-${asset.field}`} className="bg-white/60 text-slate-700 transition hover:bg-indigo-50 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800/70">
+                    <td className="px-4 py-3">
+                      {asset.previewUrl && asset.contentType.startsWith('image/') && (
+                        <Image
+                          src={asset.previewUrl}
+                          alt={asset.id}
+                          width={64}
+                          height={64}
+                          className="h-16 w-16 rounded object-cover"
+                          unoptimized
+                        />
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
                         <span className="font-medium">{asset.id}</span>
@@ -607,23 +645,50 @@ export function UploadForm() {
                           rel="noopener noreferrer"
                           className="text-xs text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
                         >
-                          Original
+                          Original Source
                         </a>
                       </div>
                     </td>
                     <td className="px-4 py-3">{asset.variant}</td>
                     <td className="px-4 py-3">{asset.field}</td>
                     <td className="px-4 py-3">{asset.contentType}</td>
-                    <td className="px-4 py-3">{asset.sizeLabel}</td>
                     <td className="px-4 py-3">
-                      <a
-                        href={asset.publicUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="break-all text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
-                      >
-                        {asset.publicUrl}
-                      </a>
+                      <div className="flex flex-col gap-1">
+                        <span>{asset.sizeLabel}</span>
+                        {asset.resizedSize && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            256px: {asset.resizedSize}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-2">
+                        <div>
+                          <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Full Size:</div>
+                          <a
+                            href={asset.publicUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="break-all text-xs text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
+                          >
+                            {asset.publicUrl}
+                          </a>
+                        </div>
+                        {asset.resizedUrl && (
+                          <div>
+                            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">256px:</div>
+                            <a
+                              href={asset.resizedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="break-all text-xs text-indigo-600 hover:text-indigo-500 dark:text-indigo-300"
+                            >
+                              {asset.resizedUrl}
+                            </a>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
