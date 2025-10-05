@@ -115,10 +115,12 @@ export async function uploadBuffer({
 
 export async function uploadJson({ key, json }: { key: string; json: unknown }) {
   const payload = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+  const fileName = key.split('/').pop() || 'script.json';
   const result = await putObject({
     Key: key,
     Body: payload,
     ContentType: "application/json",
+    ContentDisposition: `attachment; filename="${fileName}"`,
     CacheControl: "no-cache",
   });
   return buildPublicUrl(result.key);
