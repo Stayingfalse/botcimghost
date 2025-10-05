@@ -343,7 +343,8 @@ async function downloadAssetPlan(
   preferProxy: boolean,
   proxyPool: string[],
   preferredProxy: string | undefined,
-  proxiesUsed: Set<string>
+  proxiesUsed: Set<string>,
+  forceReprocess: boolean
 ): Promise<AssetUploadResult[]> {
   const shouldAllowDirectFallback = !preferProxy || proxyPool.length === 0;
 
@@ -376,8 +377,8 @@ async function downloadAssetPlan(
       const sanitizedBase = plan.fileBaseName.replace(/[^\w.-]/g, "_");
       const key = `${prefix}/${sanitizedBase}_${imageHash}.${extension}`;
 
-      // Check if asset already exists (deduplication)
-      const exists = await checkExists(key);
+      // Check if asset already exists (deduplication) - skip if force reprocess is enabled
+      const exists = !forceReprocess && await checkExists(key);
       if (exists) {
         // Asset already exists, return existing reference without re-uploading
         const { publicUrl } = await storeBuffer({
@@ -402,7 +403,7 @@ async function downloadAssetPlan(
         // For character images, create or reuse 256px version
         if (plan.entryType === "character" && plan.field === "image") {
           const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
-          const resizedExists = await checkExists(resizedKey);
+          const resizedExists = !forceReprocess && await checkExists(resizedKey);
 
           if (resizedExists) {
             // Resized version already exists, reuse it
@@ -520,7 +521,7 @@ async function downloadAssetPlan(
 
 export async function processScriptUpload(
   { scriptContent, requestedName }: ProcessScriptParams,
-  options?: { onEvent?: (event: ProcessingEvent) => void; useUsProxy?: boolean; publicBaseUrl?: string }
+  options?: { onEvent?: (event: ProcessingEvent) => void; useUsProxy?: boolean; forceReprocess?: boolean; publicBaseUrl?: string }
 ): Promise<ProcessedScriptResponse> {
   const emit = options?.onEvent ?? (() => {});
   const parsed = JSON.parse(scriptContent);
@@ -599,7 +600,8 @@ export async function processScriptUpload(
           preferProxy,
           proxyPool,
           preferredProxy,
-          proxiesUsed
+          proxiesUsed,
+          options?.forceReprocess ?? false
         );
 
         assetResults[currentIndex] = assets;

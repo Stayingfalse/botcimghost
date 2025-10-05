@@ -126,6 +126,7 @@ export function UploadForm() {
   const [totalAssets, setTotalAssets] = useState<number | null>(null);
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [useProxy, setUseProxy] = useState(false);
+  const [forceReprocess, setForceReprocess] = useState(false);
   const [proxyOptionEnabled, setProxyOptionEnabled] = useState(false);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const totalAssetsRef = useRef<number | null>(null);
@@ -195,6 +196,7 @@ export function UploadForm() {
         payload.append("scriptName", scriptName.trim());
       }
       payload.append("useProxy", useProxy ? "true" : "false");
+      payload.append("forceReprocess", forceReprocess ? "true" : "false");
 
       const controller = new AbortController();
       uploadAbortRef.current = controller;
@@ -405,6 +407,22 @@ export function UploadForm() {
               </span>
             </label>
           )}
+          <label className="flex items-start gap-3 rounded-md border border-transparent px-2 py-1.5 text-sm transition hover:border-indigo-200 dark:hover:border-indigo-700">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
+              checked={forceReprocess}
+              onChange={(event) => setForceReprocess(event.target.checked)}
+              disabled={processing}
+              name="forceReprocessToggle"
+            />
+            <span className="text-slate-700 dark:text-slate-200">
+              Force reprocess all images
+              <span className="block text-xs text-slate-500 dark:text-slate-400">
+                Bypass cache and regenerate all images, even if they already exist in storage.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="flex items-center justify-between">

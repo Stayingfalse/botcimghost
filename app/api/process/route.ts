@@ -12,6 +12,7 @@ type StreamPayload =
 type StreamOptions = {
   requestedName?: string;
   useProxy?: boolean;
+  forceReprocess?: boolean;
   publicBaseUrl?: string;
 };
 
@@ -75,6 +76,7 @@ function streamProcessing(scriptContent: string, options?: StreamOptions) {
           {
             onEvent: (event) => send({ type: "progress", event }),
             useUsProxy: options?.useProxy,
+            forceReprocess: options?.forceReprocess,
             publicBaseUrl: options?.publicBaseUrl,
           }
         );
@@ -125,6 +127,7 @@ export async function POST(request: NextRequest) {
     return streamProcessing(body.script, {
       requestedName: typeof body.scriptName === "string" ? body.scriptName : undefined,
       useProxy: parseBoolean((body as Record<string, unknown>).useProxy),
+      forceReprocess: parseBoolean((body as Record<string, unknown>).forceReprocess),
       publicBaseUrl,
     });
   }
@@ -150,11 +153,13 @@ export async function POST(request: NextRequest) {
 
   const overrideName = formData.get("scriptName");
   const useProxyValue = formData.get("useProxy");
+  const forceReprocessValue = formData.get("forceReprocess");
   const buffer = Buffer.from(await file.arrayBuffer());
 
   return streamProcessing(buffer.toString("utf-8"), {
     requestedName: typeof overrideName === "string" ? overrideName : undefined,
     useProxy: parseBoolean(useProxyValue),
+    forceReprocess: parseBoolean(forceReprocessValue),
     publicBaseUrl,
   });
 }
