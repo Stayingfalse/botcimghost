@@ -423,28 +423,36 @@ async function downloadAssetPlan(
               size: 0,
             });
           } else {
-            // Resized version doesn't exist, create it from the existing original
+            // Resized version doesn't exist, check if we need to create it
             try {
-              const resizedBuffer = await sharp(buffer)
-                .resize(256, 256, { fit: "cover" })
-                .toBuffer();
+              const metadata = await sharp(buffer).metadata();
+              const width = metadata.width ?? 0;
+              const height = metadata.height ?? 0;
 
-              const { storageKey: resizedStorageKey, publicUrl: resizedPublicUrl } = await storeBuffer({
-                key: resizedKey,
-                buffer: resizedBuffer,
-                contentType,
-                cacheControl: "public, max-age=31536000, immutable",
-              });
+              // Only resize if image is larger than 256px in either dimension
+              if (width > 256 || height > 256) {
+                const resizedBuffer = await sharp(buffer)
+                  .resize(256, 256, { fit: "cover" })
+                  .toBuffer();
 
-              results.push({
-                ...plan,
-                fileBaseName: `${plan.fileBaseName}_256`,
-                variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
-                storageKey: resizedStorageKey,
-                publicUrl: resizedPublicUrl,
-                contentType,
-                size: resizedBuffer.byteLength,
-              });
+                const { storageKey: resizedStorageKey, publicUrl: resizedPublicUrl } = await storeBuffer({
+                  key: resizedKey,
+                  buffer: resizedBuffer,
+                  contentType,
+                  cacheControl: "public, max-age=31536000, immutable",
+                });
+
+                results.push({
+                  ...plan,
+                  fileBaseName: `${plan.fileBaseName}_256`,
+                  variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
+                  storageKey: resizedStorageKey,
+                  publicUrl: resizedPublicUrl,
+                  contentType,
+                  size: resizedBuffer.byteLength,
+                });
+              }
+              // If image is already small, don't create a resized version - use original in both scripts
             } catch (resizeError) {
               console.warn(`Failed to resize existing character image ${plan.originalUrl}:`, resizeError);
               // Continue without resized version if resize fails
@@ -474,30 +482,38 @@ async function downloadAssetPlan(
         size: buffer.byteLength,
       }];
 
-      // For character images, also create and store 256px version
+      // For character images, check if we need to create a 256px version
       if (plan.entryType === "character" && plan.field === "image") {
         try {
-          const resizedBuffer = await sharp(buffer)
-            .resize(256, 256, { fit: "cover" })
-            .toBuffer();
+          const metadata = await sharp(buffer).metadata();
+          const width = metadata.width ?? 0;
+          const height = metadata.height ?? 0;
 
-          const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
-          const { storageKey: resizedStorageKey, publicUrl: resizedPublicUrl } = await storeBuffer({
-            key: resizedKey,
-            buffer: resizedBuffer,
-            contentType,
-            cacheControl: "public, max-age=31536000, immutable",
-          });
+          // Only resize if image is larger than 256px in either dimension
+          if (width > 256 || height > 256) {
+            const resizedBuffer = await sharp(buffer)
+              .resize(256, 256, { fit: "cover" })
+              .toBuffer();
 
-          results.push({
-            ...plan,
-            fileBaseName: `${plan.fileBaseName}_256`,
-            variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
-            storageKey: resizedStorageKey,
-            publicUrl: resizedPublicUrl,
-            contentType,
-            size: resizedBuffer.byteLength,
-          });
+            const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
+            const { storageKey: resizedStorageKey, publicUrl: resizedPublicUrl } = await storeBuffer({
+              key: resizedKey,
+              buffer: resizedBuffer,
+              contentType,
+              cacheControl: "public, max-age=31536000, immutable",
+            });
+
+            results.push({
+              ...plan,
+              fileBaseName: `${plan.fileBaseName}_256`,
+              variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
+              storageKey: resizedStorageKey,
+              publicUrl: resizedPublicUrl,
+              contentType,
+              size: resizedBuffer.byteLength,
+            });
+          }
+          // If image is already small, don't create a resized version - use original in both scripts
         } catch (resizeError) {
           console.warn(`Failed to resize character image ${plan.originalUrl}:`, resizeError);
           // Continue without resized version if resize fails
@@ -632,10 +648,16 @@ export async function processScriptUpload(
   const originalAssets = processedAssets.filter(asset => !asset.variantLabel?.includes("(256px)"));
   const resizedAssets = processedAssets.filter(asset => asset.variantLabel?.includes("(256px)"));
 
+  console.log(`\n=== Script Generation Debug ===`);
+  console.log(`Total assets: ${processedAssets.length}`);
+  console.log(`Original assets: ${originalAssets.length}`);
+  console.log(`Resized assets: ${resizedAssets.length}`);
+
   // Create a map for quick lookup of resized versions
   const resizedMap = new Map<string, AssetUploadResult>();
   resizedAssets.forEach(asset => {
     const key = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
+    console.log(`  Resized map: ${key} -> ${asset.publicUrl} (${asset.fileBaseName})`);
     resizedMap.set(key, asset);
   });
 
@@ -653,15 +675,23 @@ export async function processScriptUpload(
       const resizedKey = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
       const resizedAsset = resizedMap.get(resizedKey);
 
+      console.log(`  Processing: ${asset.fileBaseName} (index ${asset.scriptIndex}, variant ${asset.variantIndex ?? 0})`);
+      console.log(`    Lookup key: ${resizedKey}`);
+      console.log(`    Found resized: ${!!resizedAsset}`);
+      console.log(`    Original URL: ${asset.publicUrl}`);
+      console.log(`    Resized URL: ${resizedAsset?.publicUrl ?? 'N/A'}`);
+
       if (Array.isArray(imageValue)) {
         const index = asset.variantIndex ?? 0;
         imageValue[index] = asset.publicUrl;
         if (Array.isArray(imageValue256)) {
           imageValue256[index] = resizedAsset?.publicUrl ?? asset.publicUrl;
+          console.log(`    Array[${index}] 256 script set to: ${imageValue256[index]}`);
         }
       } else {
         (entry as ScriptCharacter).image = asset.publicUrl;
         (entry256 as ScriptCharacter).image = resizedAsset?.publicUrl ?? asset.publicUrl;
+        console.log(`    Single image 256 script set to: ${(entry256 as ScriptCharacter).image}`);
       }
     } else {
       // For logo and background, use full size in both scripts
