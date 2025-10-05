@@ -47,9 +47,6 @@ type AssetUploadResult = AssetPlan & {
   publicUrl: string;
   contentType: string;
   size: number;
-  resizedStorageKey?: string;
-  resizedPublicUrl?: string;
-  resizedSize?: number;
 };
 
 type StorageMode = "s3" | "local";
@@ -347,7 +344,7 @@ async function downloadAssetPlan(
   proxyPool: string[],
   preferredProxy: string | undefined,
   proxiesUsed: Set<string>
-): Promise<AssetUploadResult> {
+): Promise<AssetUploadResult[]> {
   const shouldAllowDirectFallback = !preferProxy || proxyPool.length === 0;
 
   const attempts: Array<string | undefined> = preferProxy && proxyPool.length > 0
@@ -394,8 +391,15 @@ async function downloadAssetPlan(
           proxiesUsed.add(proxyCandidate);
         }
 
+        const results: AssetUploadResult[] = [{
+          ...plan,
+          storageKey: key,
+          publicUrl,
+          contentType,
+          size: buffer.byteLength,
+        }];
+
         // For character images, also check for 256px version
-        let resizedResult: { storageKey: string; publicUrl: string; size: number } | undefined;
         if (plan.entryType === "character" && plan.field === "image") {
           const resizedKey = `${prefix}/${sanitizedBase}_${imageHash}_256.${extension}`;
           const resizedExists = await checkExists(resizedKey);
@@ -406,20 +410,19 @@ async function downloadAssetPlan(
               contentType,
               cacheControl: "public, max-age=31536000, immutable",
             });
-            resizedResult = { storageKey: resizedKey, publicUrl: resizedPublicUrl, size: 0 };
+            results.push({
+              ...plan,
+              fileBaseName: `${plan.fileBaseName}_256`,
+              variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
+              storageKey: resizedKey,
+              publicUrl: resizedPublicUrl,
+              contentType,
+              size: 0,
+            });
           }
         }
 
-        return {
-          ...plan,
-          storageKey: key,
-          publicUrl,
-          contentType,
-          size: buffer.byteLength,
-          resizedStorageKey: resizedResult?.storageKey,
-          resizedPublicUrl: resizedResult?.publicUrl,
-          resizedSize: resizedResult?.size,
-        };
+        return results;
       }
 
       const { storageKey, publicUrl } = await storeBuffer({
@@ -429,8 +432,19 @@ async function downloadAssetPlan(
         cacheControl: "public, max-age=31536000, immutable",
       });
 
+      if (typeof proxyCandidate === "string") {
+        proxiesUsed.add(proxyCandidate);
+      }
+
+      const results: AssetUploadResult[] = [{
+        ...plan,
+        storageKey,
+        publicUrl,
+        contentType,
+        size: buffer.byteLength,
+      }];
+
       // For character images, also create and store 256px version
-      let resizedResult: { storageKey: string; publicUrl: string; size: number } | undefined;
       if (plan.entryType === "character" && plan.field === "image") {
         try {
           const resizedBuffer = await sharp(buffer)
@@ -445,31 +459,22 @@ async function downloadAssetPlan(
             cacheControl: "public, max-age=31536000, immutable",
           });
 
-          resizedResult = {
+          results.push({
+            ...plan,
+            fileBaseName: `${plan.fileBaseName}_256`,
+            variantLabel: plan.variantLabel ? `${plan.variantLabel} (256px)` : "256px",
             storageKey: resizedStorageKey,
             publicUrl: resizedPublicUrl,
+            contentType,
             size: resizedBuffer.byteLength,
-          };
+          });
         } catch (resizeError) {
           console.warn(`Failed to resize character image ${plan.originalUrl}:`, resizeError);
           // Continue without resized version if resize fails
         }
       }
 
-      if (typeof proxyCandidate === "string") {
-        proxiesUsed.add(proxyCandidate);
-      }
-
-      return {
-        ...plan,
-        storageKey,
-        publicUrl,
-        contentType,
-        size: buffer.byteLength,
-        resizedStorageKey: resizedResult?.storageKey,
-        resizedPublicUrl: resizedResult?.publicUrl,
-        resizedSize: resizedResult?.size,
-      };
+      return results;
     } catch (error) {
       const detail = error instanceof Error && error.name === "AbortError"
         ? `timed out after ${REQUEST_TIMEOUT_MS}ms`
@@ -537,7 +542,7 @@ export async function processScriptUpload(
         }
       : writeLocalJson({ key, json, baseUrl: basePublicUrl });
 
-  const assetResults: (AssetUploadResult | undefined)[] = new Array(plans.length);
+  const assetResults: (AssetUploadResult[] | undefined)[] = new Array(plans.length);
 
   const baseConcurrency = preferProxy ? PROXY_CONCURRENCY : DIRECT_CONCURRENCY;
   const concurrency = Math.max(1, Math.min(plans.length, baseConcurrency));
@@ -557,7 +562,7 @@ export async function processScriptUpload(
         const plan = plans[currentIndex];
         emit({ type: "assetStart", plan });
 
-        const asset = await downloadAssetPlan(
+        const assets = await downloadAssetPlan(
           plan,
           prefix,
           storeBuffer,
@@ -568,19 +573,20 @@ export async function processScriptUpload(
           proxiesUsed
         );
 
-        assetResults[currentIndex] = asset;
-        emit({ type: "assetStored", plan, asset });
+        assetResults[currentIndex] = assets;
+        // Emit for the primary asset (first in array)
+        emit({ type: "assetStored", plan, asset: assets[0] });
       }
     })();
   });
 
   await Promise.all(workers);
 
-  const processedAssets = assetResults.map((asset, index) => {
-    if (!asset) {
+  const processedAssets = assetResults.flatMap((assets, index) => {
+    if (!assets) {
       throw new Error(`Asset plan at index ${index} did not complete processing.`);
     }
-    return asset;
+    return assets;
   });
 
   const rewrittenScript = (typeof structuredClone === "function"
@@ -591,7 +597,18 @@ export async function processScriptUpload(
     ? structuredClone(script)
     : JSON.parse(JSON.stringify(script))) as ScriptDocument;
 
-  processedAssets.forEach((asset) => {
+  // Separate original and resized assets
+  const originalAssets = processedAssets.filter(asset => !asset.variantLabel?.includes("(256px)"));
+  const resizedAssets = processedAssets.filter(asset => asset.variantLabel?.includes("(256px)"));
+
+  // Create a map for quick lookup of resized versions
+  const resizedMap = new Map<string, AssetUploadResult>();
+  resizedAssets.forEach(asset => {
+    const key = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
+    resizedMap.set(key, asset);
+  });
+
+  originalAssets.forEach((asset) => {
     const entry = rewrittenScript[asset.scriptIndex];
     const entry256 = rewritten256Script[asset.scriptIndex];
     if (!isRecord(entry)) return;
@@ -600,17 +617,20 @@ export async function processScriptUpload(
     if (asset.field === "image") {
       const imageValue = (entry as ScriptCharacter).image;
       const imageValue256 = (entry256 as ScriptCharacter).image;
+
+      // Find corresponding 256px version if it exists
+      const resizedKey = `${asset.scriptIndex}:${asset.variantIndex ?? 0}`;
+      const resizedAsset = resizedMap.get(resizedKey);
+
       if (Array.isArray(imageValue)) {
         const index = asset.variantIndex ?? 0;
         imageValue[index] = asset.publicUrl;
-        // Use resized URL for 256 script if available, otherwise use original
         if (Array.isArray(imageValue256)) {
-          imageValue256[index] = asset.resizedPublicUrl ?? asset.publicUrl;
+          imageValue256[index] = resizedAsset?.publicUrl ?? asset.publicUrl;
         }
       } else {
         (entry as ScriptCharacter).image = asset.publicUrl;
-        // Use resized URL for 256 script if available, otherwise use original
-        (entry256 as ScriptCharacter).image = asset.resizedPublicUrl ?? asset.publicUrl;
+        (entry256 as ScriptCharacter).image = resizedAsset?.publicUrl ?? asset.publicUrl;
       }
     } else {
       // For logo and background, use full size in both scripts
