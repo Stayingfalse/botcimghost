@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, PutObjectCommandInput } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, PutObjectCommandInput, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { requireS3Config, runtimeEnv } from "./env";
 
 let cachedClient: S3Client | null = null;
@@ -68,6 +68,25 @@ export function buildPublicUrl(key: string) {
   return `https://${config.bucket}.s3.${config.region}.amazonaws.com/${trimmedKey}`;
 }
 
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    const config = requireS3Config();
+    const client = getClient();
+    const prefixedKey = applyPathPrefix(key);
+
+    await client.send(
+      new HeadObjectCommand({
+        Bucket: config.bucket,
+        Key: prefixedKey,
+      })
+    );
+    return true;
+  } catch {
+    // HeadObject throws NotFound error if object doesn't exist
+    return false;
+  }
+}
+
 export async function uploadBuffer({
   key,
   buffer,
@@ -79,6 +98,11 @@ export async function uploadBuffer({
   contentType?: string;
   cacheControl?: string;
 }) {
+  // If buffer is empty, skip upload and just return the public URL
+  if (buffer.length === 0) {
+    return buildPublicUrl(applyPathPrefix(key));
+  }
+
   const result = await putObject({
     Key: key,
     Body: buffer,
