@@ -35,14 +35,22 @@ async function serveAsset(params: { asset?: string[] }) {
     const nodeStream = createReadStream(resolvedPath);
     const body = Readable.toWeb(nodeStream) as unknown as ReadableStream;
     const contentType = mimeLookup(resolvedPath) || "application/octet-stream";
+    const fileName = path.basename(resolvedPath);
+
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Content-Length": fileStats.size.toString(),
+      "Cache-Control": "public, max-age=31536000, immutable",
+    };
+
+    // For JSON files, add Content-Disposition to ensure proper handling
+    if (contentType === "application/json") {
+      headers["Content-Disposition"] = `attachment; filename="${fileName}"`;
+    }
 
     return new NextResponse(body, {
       status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Content-Length": fileStats.size.toString(),
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
+      headers,
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
